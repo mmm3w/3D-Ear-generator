@@ -1,0 +1,56 @@
+name: Package and publish Blender add-on
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  package-addon:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Build add-on ZIP
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          from zipfile import ZIP_DEFLATED, ZipFile
+
+          root = Path("ear_generator")
+          required = (
+              root / "__init__.py",
+              root / "localization.py",
+              root / "assets" / "ear_reference.blend",
+          )
+          missing = [str(path) for path in required if not path.is_file()]
+          if missing:
+              raise SystemExit(f"Missing add-on files: {missing}")
+
+          with ZipFile("ear_generator_addon.zip", "w", ZIP_DEFLATED) as archive:
+              for path in sorted(root.rglob("*")):
+                  if (
+                      path.is_file()
+                      and "__pycache__" not in path.parts
+                      and path.suffix in {".py", ".blend", ".ear"}
+                  ):
+                      archive.write(path, path.as_posix())
+
+          with ZipFile("ear_generator_addon.zip") as archive:
+              damaged = archive.testzip()
+              if damaged is not None:
+                  raise SystemExit(f"Damaged ZIP entry: {damaged}")
+              print(f"Built ear_generator_addon.zip with {len(archive.namelist())} files")
+          PY
+
+      - name: Upload ZIP to published release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          gh release upload "${{ github.event.release.tag_name }}"
+          ear_generator_addon.zip
+          --clobber
